@@ -1,0 +1,325 @@
+from OpenGL.GL import *
+from OpenGL.GLUT import *
+from OpenGL.GLU import *
+import random
+import math
+import time
+
+
+camera_angle = 0  
+camera_height = 2  
+camera_distance = 5 
+min_camera_height = 1
+max_camera_height = 10
+
+player_pos = [0, 0, 0]  
+player_rotation = 0  
+movement_speed = 0.5
+score = 0
+lives = 3
+game_over = False
+
+world_size = 50  
+obstacles = []
+rotation_angles = []  
+
+bullets = []
+bullet_speed = 0.1
+bullet_size = 0.1
+last_shot_time = 0
+shot_cooldown = 0.3  
+
+def init():
+    glClearColor(0.53, 0.81, 0.92, 1.0)  
+    
+    generate_environment()
+
+def generate_environment():
+    global obstacles, rotation_angles
+    obstacles = []
+    rotation_angles = []
+    for i in range(30):  
+        x = random.uniform(-world_size, world_size)
+        z = random.uniform(-world_size, world_size)
+
+        if abs(x) > 5 or abs(z) > 5:
+            obstacles.append([x, 0, z])
+            rotation_angles.append(random.uniform(0, 360))  
+
+def draw_ground():
+    glPushMatrix()
+    glBegin(GL_QUADS)
+    glColor3f(0.55, 0.27, 0.07)  # Brown color
+    glVertex3f(-world_size, 0, -world_size)
+    glVertex3f(world_size, 0, -world_size)
+    glVertex3f(world_size, 0, world_size)
+    glVertex3f(-world_size, 0, world_size)
+    glEnd()
+    glPopMatrix()
+
+def draw_obstacles():
+    current_time = time.time()
+    
+    for i, obs in enumerate(obstacles):
+        glPushMatrix()
+        glTranslatef(obs[0], obs[1], obs[2])
+        
+        
+        rotation_angles[i] = (rotation_angles[i] + 2 * (current_time % 0.1)) % 360
+        glRotatef(rotation_angles[i], 0, 1, 0)  
+        
+        glColor3f(1, 0, 0)  
+        
+        glutSolidCube(2.0)
+        
+        glPopMatrix()
+
+def draw_player():
+    glPushMatrix()
+    glTranslatef(player_pos[0], player_pos[1], player_pos[2])
+    glRotatef(player_rotation, 0, 1, 0)  
+    
+    glColor3f(0, 0, 1)
+    
+
+    glPushMatrix()
+    glScalef(1, 0.5, 2)
+    glutSolidCube(1)
+    glPopMatrix()
+    
+    
+    glPushMatrix()
+    glTranslatef(0, 0.3, 0)
+    glScalef(0.8, 0.3, 1.5)
+    glutSolidCube(1)
+    glPopMatrix()
+    
+    glPopMatrix()
+
+def draw_bullets():
+    glColor3f(0, 0, 0)  
+    for bullet in bullets:
+        glPushMatrix()
+        glTranslatef(bullet[0], bullet[1], bullet[2])
+        glutSolidSphere(bullet_size, 10, 10)
+        glPopMatrix()
+
+def update_bullets():
+    global bullets, score
+    
+    current_time = time.time()
+    bullets_to_remove = []
+    
+    for i, bullet in enumerate(bullets):
+        
+        angle_rad = math.radians(-player_rotation)
+        bullets[i][0] += bullet_speed * math.sin(angle_rad)
+        bullets[i][2] -= bullet_speed * math.cos(angle_rad)
+        
+        if (abs(bullet[0]) > world_size or 
+            abs(bullet[2]) > world_size or
+            bullet[1] < 0 or bullet[1] > world_size):
+            bullets_to_remove.append(i)
+    
+    for i in sorted(bullets_to_remove, reverse=True):
+        bullets.pop(i)
+    
+    for bullet in bullets[:]:
+        for i, obstacle in enumerate(obstacles[:]):
+            dx = bullet[0] - obstacle[0]
+            dz = bullet[2] - obstacle[2]
+            distance = math.sqrt(dx*dx + dz*dz)
+            if distance < 1.0 + bullet_size:
+                if bullet in bullets:
+                    bullets.remove(bullet)
+                if obstacle in obstacles:
+                    obstacles.remove(obstacle)
+                    rotation_angles.pop(i)
+                    score += 1
+                break
+
+def draw_text(x, y, text,font=GLUT_BITMAP_HELVETICA_18):
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 800, 0, 600)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    glColor3f(1, 1, 1)
+    glRasterPos2f(x, y)
+    for character in text:
+        glutBitmapCharacter(font, ord(character))
+    
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+
+def draw_hud():
+    draw_text(20, 570, f"Score: {score}")
+    draw_text(20, 540, "Lives:")
+    
+    # Draw lives as green circles
+    glMatrixMode(GL_PROJECTION)
+    glPushMatrix()
+    glLoadIdentity()
+    gluOrtho2D(0, 800, 0, 600)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glPushMatrix()
+    glLoadIdentity()
+    
+    circle_radius = 15
+    spacing = 40
+    start_x = 100
+    
+    for i in range(lives):
+        glColor3f(0, 1, 0)
+        glBegin(GL_TRIANGLE_FAN)
+        glVertex2f(start_x + i * spacing, 550)
+        for angle in range(0, 361, 20):
+            rad = math.radians(angle)
+            glVertex2f(start_x + i * spacing + math.cos(rad) * circle_radius, 
+                       550 + math.sin(rad) * circle_radius)
+        glEnd()
+    
+    glPopMatrix()
+    glMatrixMode(GL_PROJECTION)
+    glPopMatrix()
+    glMatrixMode(GL_MODELVIEW)
+    
+    if game_over:
+        draw_text(300, 300, "GAME OVER")
+        draw_text(280, 270, f"Final Score: {score}")
+
+def check_collisions():
+    global lives, score, game_over
+    
+    if lives <= 0:
+        game_over = True
+        return
+    
+    player_size = 1.0
+    
+    for obs in obstacles:
+        dx = player_pos[0] - obs[0]
+        dz = player_pos[2] - obs[2]
+        distance = math.sqrt(dx*dx + dz*dz)
+        
+        if distance < player_size + 1.0:
+            lives -= 1
+            player_pos[0] = 0
+            player_pos[2] = 0
+            score = max(0, score - 10)
+            break
+
+def setup_camera():
+    glMatrixMode(GL_PROJECTION)
+    glLoadIdentity()
+    gluPerspective(60, 1.33, 0.1, 1000)
+    
+    glMatrixMode(GL_MODELVIEW)
+    glLoadIdentity()
+    
+
+    cam_x = player_pos[0] + camera_distance * math.sin(math.radians(camera_angle))
+    cam_z = player_pos[2] + camera_distance * math.cos(math.radians(camera_angle))
+    
+    gluLookAt(cam_x, camera_height, cam_z,  
+              player_pos[0], 0, player_pos[2],  
+              0, 1, 0) 
+
+def keyboard(key, x, y):
+    if game_over:
+        return
+        
+    global score, last_shot_time, player_rotation
+    
+    if key == b'w':  
+        angle_rad = math.radians(-player_rotation)
+        player_pos[0] += movement_speed * math.sin(angle_rad)
+        player_pos[2] -= movement_speed * math.cos(angle_rad)
+        
+    elif key == b's': 
+        angle_rad = math.radians(-player_rotation)
+        player_pos[0] -= movement_speed * math.sin(angle_rad)
+        player_pos[2] += movement_speed * math.cos(angle_rad)
+        
+    elif key == b'a':  
+        player_rotation = (player_rotation + 5) % 360
+        
+    elif key == b'd':  
+        player_rotation = (player_rotation - 5) % 360
+        
+    elif key == b' ':  
+        current_time = time.time()
+        if current_time - last_shot_time > shot_cooldown:
+            
+            angle_rad = math.radians(player_rotation)
+            bullets.append([
+                player_pos[0] + 1 * math.sin(angle_rad),
+                player_pos[1] + 0.5,
+                player_pos[2] - 1 * math.cos(angle_rad)
+            ])
+            last_shot_time = current_time
+
+def special_keys(key, x, y):
+    global camera_angle, camera_height
+    
+    if key == GLUT_KEY_UP:  
+        camera_height = min(camera_height + 0.5, max_camera_height)
+        
+    elif key == GLUT_KEY_DOWN:  
+        camera_height = max(camera_height - 0.5, min_camera_height)
+        
+    elif key == GLUT_KEY_LEFT:  
+        camera_angle = (camera_angle + 5) % 360
+        
+    elif key == GLUT_KEY_RIGHT:  
+        camera_angle = (camera_angle - 5) % 360
+
+def update(value):
+    if not game_over:
+        check_collisions()
+        update_bullets()
+    glutPostRedisplay()
+    
+
+def display():
+    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT)
+    setup_camera()
+    
+    draw_ground()
+    draw_obstacles()
+    draw_player()
+    draw_bullets()
+    draw_hud()
+    
+    
+    glutSwapBuffers()
+
+def idle():
+    if not game_over:
+        check_collisions()
+        update_bullets()
+    glutPostRedisplay()  
+
+def main():
+    glutInit()
+    glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGB | GLUT_DEPTH)
+    glutInitWindowSize(800, 600)
+    glutCreateWindow(b"3D Game with Camera Controls")
+    
+    init()
+    glutDisplayFunc(display)
+    glutKeyboardFunc(keyboard)
+    glutSpecialFunc(special_keys)
+    glutIdleFunc(idle)  
+    
+    glutMainLoop()
+
+if __name__ == "__main__":
+    main()
